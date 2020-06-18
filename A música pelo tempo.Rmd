@@ -1,0 +1,259 @@
+---
+title: "Music over time"
+author: "Marina Greenman and Angelo Lorençoni"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+
+*Data cleaning and organization*
+
+```{r setup, include=TRUE, warning=FALSE, message=FALSE}
+
+library("billboarder")
+library(billboard)
+library(tidyverse)
+library(tidytext)
+library("viridis") 
+require(ggrepel)
+library(ggwordcloud) 
+require(gganimate)
+require(plotly)
+require(knitr)
+library(png)
+require(grid)
+require(gridExtra)
+
+wiki_hot_100s[c(1:6),]
+
+billboard_raw <- as_tibble(wiki_hot_100s)
+billboard_raw %>%
+  mutate(rank = as.numeric(no),
+         year = as.numeric(year))
+
+row_tie <- billboard_raw %>%
+  mutate(row_num = 1:n()) %>%
+  filter(no == "Tie") %>%
+  pull(row_num)
+
+row_pad <- c(row_tie, 
+             row_tie + 1, 
+             row_tie -1) %>% 
+  sort()
+
+billboard_raw %>% slice(row_pad)
+
+billboard_raw %>%
+  mutate(rank = as.numeric(no)) %>%
+  mutate(rank_lag = lag(rank)) %>%
+  select(no,rank,rank_lag) %>%
+  mutate(rank_rep = if_else(is.na(rank),
+                            true = rank_lag,
+                            false = rank)) %>%
+  filter(is.na(rank))
+
+billboard_raw %>% 
+  mutate(rank = as.numeric(no)) %>%
+  mutate(rank_lag = lag(rank)) %>%
+  select(no,rank,rank_lag) %>%
+  mutate(rank_rep = if_else(is.na(rank),
+                            true = rank_lag,
+                            false = rank)) %>%
+  slice(row_pad)
+
+billboard_clean <- billboard_raw %>%
+  mutate(rank = as.numeric(no),
+         year = as.numeric(year),
+         rank_lag = lag(rank),
+         rank_rep = if_else(condition = is.na(rank),
+                            true = rank_lag,
+                            false = rank)) %>%
+  select(rank_rep,
+         title,
+         artist,
+         year) %>%
+  rename(rank = rank_rep)
+
+```
+
+# Gráfico 1: Top 10 Artists by gender
+
+```{r}
+#Plot top 10 artists by gender
+
+names <- billboard_clean %>% 
+  group_by(artist) %>%
+  summarise(n_times_in_100 = n()) %>%
+  arrange(-n_times_in_100) %>%
+  top_n(wt = n_times_in_100,
+        n = 10)
+
+billboard_clean %>% 
+  group_by(artist) %>%
+  summarise(n_times_in_100 = n()) %>%
+  arrange(-n_times_in_100) %>%
+  top_n(wt = n_times_in_100,
+        n = 10) %>%
+  ggplot(aes(x = n_times_in_100,
+           y = reorder(artist,n_times_in_100))) +
+  ggalt::geom_lollipop(horizontal = TRUE,
+                       color = c("Madonna" = "#DB4C77",
+                                 "The Beatles" = "#10559A",
+                                 "Elton John"="#10559A",
+                                 "Mariah Carey" = "#DB4C77",
+                                 'Janet Jackson'="#DB4C77",
+                                 "Stevie Wonder"="#10559A",
+                                 "Michael Jackson"="#10559A",
+                                 "Taylor Swift"="#DB4C77", 
+                                 "Whitney Houston"="#DB4C77", 
+                                 "Pink"="#DB4C77"))+
+  labs(title = "Top 10 Artists by Gender",
+       x = "# Times Appeared in top 100\nfrom 1960-2016",
+       y = "Artist") +
+  theme_minimal()+
+  theme(plot.title = element_text(hjust = 0.5, size = 20))
+
+dev.off()
+
+
+include_graphics("C:/Users/mpime/Downloads/top_10.PNG")
+
+```
+
+
+# Gráfico 2: Top 10 Artists Rise to Fame
+
+```{r}
+
+#Plot top 10 artists rise to fame
+
+billboard_clean_growth <- billboard_clean %>% 
+  add_count(artist) %>%
+  # add a grouping category for the growth
+  arrange(artist,year) %>%
+  group_by(artist) %>%
+  mutate(rank_tally = 1:n()) %>%
+  ungroup()
+
+billboard_clean_growth %>%
+  filter(n >= 19) %>%
+  ggplot(aes(x = year,
+               y = rank_tally,
+               group = artist,
+               colour = artist)) +
+    geom_line()+ 
+# +
+#     geom_label(data = filter(billboard_clean_growth,
+#                              n >= 19,
+#                              rank_tally == n),
+#                aes(label = artist,
+#                    fill = artist),
+#                colour = "white") +
+  geom_label_repel(data = filter(billboard_clean_growth,
+                             n >= 19,
+                             rank_tally == n),
+               aes(label = artist,
+                   fill = artist),
+               colour = "white",
+               fontface = 'bold', color = 'white',
+    box.padding = unit(0.35, "lines"),
+    point.padding = unit(0.5, "lines"),
+    segment.color = 'grey50',
+    force_pull = 20,
+    force = 0.5) +
+  scale_color_viridis(discrete = TRUE, option = "C")+
+  scale_fill_viridis(discrete = TRUE, option = "C") +
+  theme_minimal() + 
+  expand_limits(x = c(1964,2011)) +
+  labs(x="Years", y ="# Times artist appeared in the top 100", title = "Top 10 Artists Rise to Fame")+
+  theme(legend.position = "none") +
+  theme(axis.text.x = element_text(size=10, face="bold"),
+        axis.title = element_text(size=12, face="italic"),
+        plot.title = element_text(hjust = 0.5, size = 20),
+        plot.subtitle = element_text(hjust = 0, size = 15))
+
+dev.off()
+
+include_graphics("C:/Users/mpime/Downloads/rank_tally.PNG")
+
+```
+
+
+
+# Gráfico 3: Collaborations
+
+```{r}
+
+#Plot collaborations
+
+hot100 = billboard::wiki_hot_100s
+
+featuring_table = filter(hot100, str_detect(artist, 'featuring'))
+
+featuring_years = select(featuring_table,year)
+
+table_years = as.data.frame(table(featuring_years))
+
+auxiliar = data.frame(featuring_years = c(1975:1981, 1983, 1984, 1989), Freq = c(0))
+
+years_complete = arrange(rbind(auxiliar,table_years),featuring_years)
+
+p <- ggplot(years_complete, aes(featuring_years, Freq)) + 
+  geom_bar(stat="identity",fill="#10559A") + 
+  coord_flip() +
+  labs(x="Years", y ="# Collaborations", title = "Collaborations among Artists per Year")+
+  theme_minimal()+
+  theme(axis.text.x = element_text(size=10, face="bold"),
+        axis.title = element_text(size=12, face="italic"),
+        plot.title = element_text(hjust = 0.5, size = 20),
+        plot.subtitle = element_text(hjust = 0, size = 15))
+
+ggsave(p, filename = "C:/Users/mpime/Downloads/collaborations.PNG", dpi = 300, type = "cairo",
+       width = 10, height = 7, units = "in")
+
+include_graphics("C:/Users/mpime/Downloads/collaborations.PNG")
+
+```
+
+
+# Gráfico 4: Top 5 Words in Titles by Decade
+
+```{r}
+
+#Plot words in title by decade as a giff
+
+words <- billboard_raw %>%
+            mutate(Decade = as.numeric(year) - as.numeric(year) %% 10) %>%
+            select(Decade, title) %>%
+            unique() %>%
+            unnest_tokens(word, title) %>%
+            anti_join(stop_words) %>%
+            group_by(Decade) %>%
+            count(word) %>%
+            top_n(5) %>%
+            ungroup() %>%
+            mutate(word = reorder(word, n))
+
+# Create the plot
+p <- ggplot(words, aes(Decade, size = n, label = word)) +
+  labs(x="word", y="Decade", size = "# Times Word Appeared")+
+  geom_text_wordcloud() +
+  scale_size_area(max_size = 16) +
+  theme_minimal()+ 
+  # gganimate code
+  ggtitle("Top 5 Words in Titles by Decade") +
+  theme(axis.title = element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 20))+
+  transition_time(Decade) +
+  ease_aes("linear") +
+  enter_fade() +
+  exit_fade()
+animate(p, width = 450, height = 450)
+
+dev.off()
+
+include_graphics("C:/Users/mpime/Downloads/by_decades.PNG")
+
+```
+
+
